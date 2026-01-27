@@ -17,7 +17,7 @@ env GOOS=windows GOARCH=amd64 go build -o bin/iceminus_windows_amd64.exe .
 ```
 程序将递归扫描该目录下的所有YAML文件，查找包含敏感词的行，并在行首添加注释符号 `# ` 以屏蔽这些条目。
 
-**随后，请执行Rime的`重启算法服务`以应用更改。**
+**随后，请执行Rime的`重新部署`以应用更改。**
 
 
 ## 详细说明
@@ -59,6 +59,10 @@ path/to/file.yaml:12 -> 密码, secret
 - 默认敏感词文件为 [sensitive_words.txt](sensitive_words.txt)。每行一个敏感词，空行会被忽略。
 - 当使用 `--sensitive` 指定路径时，会优先读取外部文件；若未指定且程序使用了内嵌资源（见源码中的 `//go:embed`），则会使用内嵌内容作为默认词表。
 
+当前敏感词/NSFW词汇列表主要来源于[https://github.com/konsheng/Sensitive-lexicon](https://github.com/konsheng/Sensitive-lexicon)项目，并经过适当筛选和调整以适用于Rime雾凇拼音字典的场景。
+
+## 许可证
+本项目采用GPLv3许可证，详情请参阅[LICENSE](LICENSE)文件。
 
 
 

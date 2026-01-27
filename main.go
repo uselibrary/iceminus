@@ -204,15 +204,51 @@ func processFile(path string, words []string, dryRun bool) (int, error) {
 	}
 
 	if modified && !dryRun {
-		// write back
+		// write back to a temp file then replace the original.
 		tmp := path + ".tmp_iceminus"
-		err = os.WriteFile(tmp, []byte(strings.Join(outLines, "")), 0644)
-		if err != nil {
+		data := []byte(strings.Join(outLines, ""))
+		if err = os.WriteFile(tmp, data, 0644); err != nil {
 			return 0, err
 		}
-		if err := os.Rename(tmp, path); err != nil {
-			return 0, err
+		// Try atomic rename first.
+		if err = os.Rename(tmp, path); err == nil {
+			return matchedLines, nil
 		}
+		// On Windows, rename may fail if the destination is locked or read-only.
+		// Try to remove destination then rename.
+		if remErr := os.Remove(path); remErr == nil {
+			if err = os.Rename(tmp, path); err == nil {
+				return matchedLines, nil
+			}
+		} else {
+			// attempt to make file writable and remove again
+			_ = os.Chmod(path, 0644)
+			if remErr2 := os.Remove(path); remErr2 == nil {
+				if err = os.Rename(tmp, path); err == nil {
+					return matchedLines, nil
+				}
+			}
+		}
+		// Fallback: overwrite the original file contents.
+		tmpData, readErr := os.ReadFile(tmp)
+		if readErr != nil {
+			return 0, fmt.Errorf("rename failed: %v; remove failed: %v; read tmp failed: %v", err, os.Remove(path), readErr)
+		}
+		of, openErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if openErr != nil {
+			// try to change permissions then open again
+			_ = os.Chmod(path, 0644)
+			of, openErr = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+			if openErr != nil {
+				return 0, fmt.Errorf("failed to overwrite file after rename failure: %v; open error: %v", err, openErr)
+			}
+		}
+		if _, writeErr := of.Write(tmpData); writeErr != nil {
+			_ = of.Close()
+			return 0, writeErr
+		}
+		_ = of.Close()
+		_ = os.Remove(tmp)
 	}
 	return matchedLines, nil
 }
