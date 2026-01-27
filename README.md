@@ -1,12 +1,16 @@
 # RIME雾凇拼音字典敏感词屏蔽工具
 
-IceMinus（冰减）是一个用于屏蔽Rime输入法的[雾凇拼音（iDvel/rime-ice）](https://github.com/iDvel/rime-ice)字典敏感词（NSFW）的命令行工具。
+IceMinus（冰减）是一个用于屏蔽Rime [雾凇拼音（iDvel/rime-ice）](https://github.com/iDvel/rime-ice) 字典中敏感词（NSFW）的命令行工具。
 
 ##  使用说明
 ### 安装
-推荐下载预编译的二进制文件，或自行编译：
+**推荐在[release页面](https://github.com/uselibrary/iceminus/releases)下载预编译的二进制文件。**
 
+或自行编译，例如：
 ```bash
+git clone https://github.com/uselibrary/iceminus.git
+cd iceminus
+# 编译Windows版本
 env GOOS=windows GOARCH=amd64 go build -o bin/iceminus_windows_amd64.exe .
 ``` 
 
@@ -15,7 +19,7 @@ env GOOS=windows GOARCH=amd64 go build -o bin/iceminus_windows_amd64.exe .
 ```
 ./iceminus.exe --path C:\Users\USERNAME\AppData\Roaming\Rime\cn_dicts # USERNAME替换为你的用户名
 ```
-程序将递归扫描该目录下的所有YAML文件，查找包含敏感词的行，并在行首添加注释符号 `# ` 以屏蔽这些条目。
+程序将扫描该目录下的所有YAML文件，查找包含敏感词的行，并在行首添加注释符号 `# ` 以屏蔽这些条目。
 
 **随后，请执行Rime的`重新部署`以应用更改。**
 
