@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -15,7 +16,14 @@ import (
 var embeddedSensitive string
 
 func main() {
-	path := flag.String("path", "", "directory or file path to scan for yaml files")
+	// determine default path for --path on Windows
+	defaultPath := ""
+	if runtime.GOOS == "windows" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			defaultPath = filepath.Join(home, "AppData", "Roaming", "Rime", "cn_dicts")
+		}
+	}
+	path := flag.String("path", defaultPath, "directory or file path to scan for yaml files")
 	dry := flag.Bool("dry-run", false, "print what would be changed without modifying files")
 	sensPath := flag.String("sensitive", "sensitive_words.txt", "path to sensitive words file")
 	flag.Parse()
@@ -35,6 +43,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	// determine folder path (absolute). If a file was provided, use its parent dir.
+	absPath, _ := filepath.Abs(*path)
+	folderPath := absPath
+	if info, statErr := os.Stat(*path); statErr == nil {
+		if !info.IsDir() {
+			folderPath = filepath.Dir(absPath)
+		}
+	}
+
 	stats := &procStats{OpsPerFile: make(map[string]int)}
 	err = processPath(*path, words, *dry, stats)
 	if err != nil {
@@ -44,6 +61,7 @@ func main() {
 
 	// print summary
 	fmt.Printf("\nSummary:\n")
+	fmt.Printf("  scanned folder: %s\n", folderPath)
 	fmt.Printf("  yaml files scanned: %d\n", stats.FilesScanned)
 	fmt.Printf("  files with matches: %d\n", stats.FilesWithMatches)
 	fmt.Printf("  total matched lines: %d\n", stats.TotalMatches)
