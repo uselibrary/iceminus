@@ -15,6 +15,8 @@ import (
 //go:embed sensitive_words.txt
 var embeddedSensitive string
 
+const embeddedSentinel = "@embedded"
+
 func main() {
 	// determine default path for --path on Windows
 	defaultPath := ""
@@ -23,13 +25,14 @@ func main() {
 			defaultPath = filepath.Join(home, "AppData", "Roaming", "Rime", "cn_dicts")
 		}
 	}
+
 	path := flag.String("path", defaultPath, "directory or file path to scan for yaml files")
 	dry := flag.Bool("dry-run", false, "print what would be changed without modifying files")
-	sensPath := flag.String("sensitive", "sensitive_words.txt", "path to sensitive words file")
+	sensPath := flag.String("sensitive", embeddedSentinel, "path to sensitive words file, or @embedded to use embedded list")
 	flag.Parse()
 
 	if *path == "" {
-		fmt.Fprintln(os.Stderr, "usage: iceminus --path <path> [--dry-run] [--sensitive <file>]")
+		fmt.Fprintln(os.Stderr, "usage: iceminus --path <path> [--dry-run] [--sensitive <file|@embedded>]")
 		os.Exit(2)
 	}
 
@@ -44,7 +47,10 @@ func main() {
 	}
 
 	// determine folder path (absolute). If a file was provided, use its parent dir.
-	absPath, _ := filepath.Abs(*path)
+	absPath, absErr := filepath.Abs(*path)
+	if absErr != nil {
+		absPath = *path // fallback
+	}
 	folderPath := absPath
 	if info, statErr := os.Stat(*path); statErr == nil {
 		if !info.IsDir() {
@@ -52,8 +58,8 @@ func main() {
 		}
 	}
 
-	stats := &procStats{OpsPerFile: make(map[string]int)}
-	err = processPath(*path, words, *dry, stats)
+	stats := newProcStats()
+	err = processPath(*path, words, *dry, stats, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -80,18 +86,25 @@ type procStats struct {
 	OpsPerFile       map[string]int
 }
 
+func newProcStats() *procStats {
+	return &procStats{OpsPerFile: make(map[string]int)}
+}
+
 func loadSensitive(path string) ([]string, error) {
 	var src string
-	// use embedded content by default when the provided path equals the default
-	if path == "" || path == "sensitive_words.txt" {
+
+	// Use embedded content only when explicitly requested (or empty).
+	switch strings.TrimSpace(path) {
+	case "", embeddedSentinel:
 		src = embeddedSensitive
-	} else {
+	default:
 		b, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
 		}
 		src = string(b)
 	}
+
 	var words []string
 	scanner := bufio.NewScanner(strings.NewReader(src))
 	for scanner.Scan() {
@@ -107,11 +120,12 @@ func loadSensitive(path string) ([]string, error) {
 	return words, nil
 }
 
-func processPath(root string, words []string, dryRun bool, stats *procStats) error {
+func processPath(root string, words []string, dryRun bool, stats *procStats, out io.Writer) error {
 	info, err := os.Stat(root)
 	if err != nil {
 		return err
 	}
+
 	if info.IsDir() {
 		return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -123,7 +137,7 @@ func processPath(root string, words []string, dryRun bool, stats *procStats) err
 			ext := strings.ToLower(filepath.Ext(path))
 			if ext == ".yaml" || ext == ".yml" {
 				stats.FilesScanned++
-				cnt, err := processFile(path, words, dryRun)
+				cnt, err := processFile(path, words, dryRun, out)
 				if err != nil {
 					return err
 				}
@@ -136,9 +150,10 @@ func processPath(root string, words []string, dryRun bool, stats *procStats) err
 			return nil
 		})
 	}
+
 	// single file
 	stats.FilesScanned++
-	cnt, err := processFile(root, words, dryRun)
+	cnt, err := processFile(root, words, dryRun, out)
 	if err != nil {
 		return err
 	}
@@ -150,29 +165,33 @@ func processPath(root string, words []string, dryRun bool, stats *procStats) err
 	return nil
 }
 
-func processFile(path string, words []string, dryRun bool) (int, error) {
+func processFile(path string, words []string, dryRun bool, out io.Writer) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, err
 	}
+	// read-only file; close error is not actionable in practice
 	defer func() { _ = f.Close() }()
 
 	var outLines []string
 	r := bufio.NewReader(f)
+
 	lineNo := 0
 	modified := false
 	matchedLines := 0
+
 	for {
-		line, err := r.ReadString('\n')
-		if err != nil && err != io.EOF {
-			return 0, err
+		line, readErr := r.ReadString('\n')
+		if readErr != nil && readErr != io.EOF {
+			return 0, readErr
 		}
-		// handle last line without newline
-		rawLine := line
-		if err == io.EOF && len(line) == 0 {
+		if readErr == io.EOF && len(line) == 0 {
 			break
 		}
-		// remove trailing newline for processing but keep it for reconstruction
+
+		eof := (readErr == io.EOF)
+
+		rawLine := line
 		hasNL := strings.HasSuffix(rawLine, "\n")
 		content := rawLine
 		if hasNL {
@@ -180,93 +199,123 @@ func processFile(path string, words []string, dryRun bool) (int, error) {
 		}
 		lineNo++
 
-		// skip already commented lines only when the very first character is '#'
+		// Determine if we keep line as-is
+		keepRaw := false
+		var newLine string
+
+		// Skip already-commented lines only when the very first character is '#'
 		if strings.HasPrefix(content, "#") {
-			outLines = append(outLines, rawLine)
-			if err == io.EOF {
-				break
-			}
-			continue
-		}
-
-		var matched []string
-		for _, w := range words {
-			if w == "" {
-				continue
-			}
-			if strings.Contains(content, w) {
-				matched = append(matched, w)
-			}
-		}
-		if len(matched) > 0 {
-			modified = true
-			matchedLines++
-			fmt.Printf("%s:%d -> %s\n", path, lineNo, strings.Join(matched, ", "))
-			if dryRun {
-				outLines = append(outLines, rawLine)
-			} else {
-				// add comment marker at line start
-				newLine := "# " + content
-				if hasNL {
-					newLine += "\n"
-				}
-				outLines = append(outLines, newLine)
-			}
+			keepRaw = true
 		} else {
-			outLines = append(outLines, rawLine)
+			var matched []string
+			for _, w := range words {
+				if w == "" {
+					continue
+				}
+				if strings.Contains(content, w) {
+					matched = append(matched, w)
+				}
+			}
+
+			if len(matched) > 0 {
+				modified = true
+				matchedLines++
+
+				if _, werr := fmt.Fprintf(out, "%s:%d -> %s\n", path, lineNo, strings.Join(matched, ", ")); werr != nil {
+					return 0, werr
+				}
+
+				if dryRun {
+					keepRaw = true
+				} else {
+					newLine = "# " + content
+					if hasNL {
+						newLine += "\n"
+					}
+				}
+			} else {
+				keepRaw = true
+			}
 		}
 
-		if err == io.EOF {
+		if keepRaw {
+			outLines = append(outLines, rawLine)
+		} else {
+			outLines = append(outLines, newLine)
+		}
+
+		// Single EOF break point (avoid scattered breaks/continues)
+		if eof {
 			break
 		}
 	}
 
 	if modified && !dryRun {
-		// write back to a temp file then replace the original.
-		tmp := path + ".tmp_iceminus"
 		data := []byte(strings.Join(outLines, ""))
-		if err = os.WriteFile(tmp, data, 0644); err != nil {
+		if err := writeFileAtomic(path, data); err != nil {
 			return 0, err
 		}
-		// Try atomic rename first.
-		if err = os.Rename(tmp, path); err == nil {
-			return matchedLines, nil
-		}
-		// On Windows, rename may fail if the destination is locked or read-only.
-		// Try to remove destination then rename.
-		if remErr := os.Remove(path); remErr == nil {
-			if err = os.Rename(tmp, path); err == nil {
-				return matchedLines, nil
-			}
-		} else {
-			// attempt to make file writable and remove again
-			_ = os.Chmod(path, 0644)
-			if remErr2 := os.Remove(path); remErr2 == nil {
-				if err = os.Rename(tmp, path); err == nil {
-					return matchedLines, nil
-				}
-			}
-		}
-		// Fallback: overwrite the original file contents.
-		tmpData, readErr := os.ReadFile(tmp)
-		if readErr != nil {
-			return 0, fmt.Errorf("rename failed: %v; remove failed: %v; read tmp failed: %v", err, os.Remove(path), readErr)
-		}
-		of, openErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-		if openErr != nil {
-			// try to change permissions then open again
-			_ = os.Chmod(path, 0644)
-			of, openErr = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-			if openErr != nil {
-				return 0, fmt.Errorf("failed to overwrite file after rename failure: %v; open error: %v", err, openErr)
-			}
-		}
-		if _, writeErr := of.Write(tmpData); writeErr != nil {
-			_ = of.Close()
-			return 0, writeErr
-		}
-		_ = of.Close()
-		_ = os.Remove(tmp)
 	}
+
 	return matchedLines, nil
+}
+
+func writeFileAtomic(path string, data []byte) (err error) {
+	tmp := path + ".tmp_iceminus"
+
+	if err = os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	// Ensure tmp is always cleaned up, whether rename succeeded or we fell back to copy.
+	// (On successful rename, tmp no longer exists under this name; Remove then is harmless.)
+	defer func() { _ = os.Remove(tmp) }()
+
+	// 1) Try rename first.
+	if err = os.Rename(tmp, path); err == nil {
+		return nil
+	}
+
+	// 2) If destination exists/locked/read-only (common on Windows), try remove+rename.
+	if remErr := os.Remove(path); remErr != nil {
+		_ = os.Chmod(path, 0644)
+		_ = os.Remove(path)
+	}
+	if err2 := os.Rename(tmp, path); err2 == nil {
+		return nil
+	}
+
+	// 3) Fallback: overwrite in-place.
+	//
+	// Risk: O_TRUNC truncates immediately; if Write/Close fails, data loss is possible.
+	// Mitigation: best-effort backup original content in memory and attempt restore on failure.
+	orig, _ := os.ReadFile(path) // best effort; ignore errors
+
+	of, openErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if openErr != nil {
+		_ = os.Chmod(path, 0644)
+		of, openErr = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if openErr != nil {
+			return fmt.Errorf("failed to overwrite file after rename failure: %w", openErr)
+		}
+	}
+
+	_, werr := of.Write(data)
+	cerr := of.Close()
+
+	if werr == nil && cerr == nil {
+		return nil
+	}
+
+	// Attempt restore if we had a backup; best-effort only.
+	if orig != nil {
+		_ = os.WriteFile(path, orig, 0644)
+	}
+
+	if werr != nil && cerr != nil {
+		return fmt.Errorf("write failed: %v; close failed: %v", werr, cerr)
+	}
+	if werr != nil {
+		return werr
+	}
+	return cerr
 }
