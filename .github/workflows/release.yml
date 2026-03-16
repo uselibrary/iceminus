@@ -1,0 +1,57 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read Go version from go.mod
+        id: go_version
+        run: |
+          GO_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
+          echo "version=$GO_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.go_version.outputs.version }}
+
+      - name: Build darwin-arm64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build -ldflags="-s -w" -o iceminus-darwin-arm64 .
+
+      - name: Build linux-amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -ldflags="-s -w" -o iceminus-linux-amd64 .
+
+      - name: Build windows-amd64
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -ldflags="-s -w" -o iceminus-windows-amd64.exe .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          files: |
+            iceminus-darwin-arm64
+            iceminus-linux-amd64
+            iceminus-windows-amd64.exe
