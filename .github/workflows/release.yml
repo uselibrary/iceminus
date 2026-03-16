@@ -1,5 +1,8 @@
 name: Build & Release
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -27,6 +30,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ steps.go_version.outputs.version }}
+          cache: false
 
       - name: Build darwin-arm64
         env:
