@@ -1,5 +1,8 @@
 name: Build & Release
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
 
@@ -18,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Read Go version from go.mod
         id: go_version
@@ -27,7 +30,7 @@ jobs:
           echo "version=$GO_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ steps.go_version.outputs.version }}
           cache: false
@@ -51,7 +54,7 @@ jobs:
         run: go build -ldflags="-s -w" -o iceminus-windows-amd64.exe .
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: Release ${{ github.event.inputs.version }}
