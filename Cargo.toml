@@ -1,0 +1,10 @@
+[package]
+name = "iceminus"
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+walkdir = "2"

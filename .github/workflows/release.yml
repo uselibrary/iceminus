@@ -1,8 +1,5 @@
 name: Build & Release
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 permissions:
   contents: write
 
@@ -16,42 +13,82 @@ on:
 
 jobs:
   build:
-    name: Build binaries
-    runs-on: ubuntu-latest
+    name: Build binaries (Rust)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: iceminus-darwin-arm64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: iceminus-linux-amd64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: iceminus-windows-amd64.exe
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Read Go version from go.mod
-        id: go_version
-        run: |
-          GO_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
-          echo "version=$GO_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
-          go-version: ${{ steps.go_version.outputs.version }}
-          cache: false
+          toolchain: stable
+          override: true
 
-      - name: Build darwin-arm64
-        env:
-          GOOS: darwin
-          GOARCH: arm64
-        run: go build -ldflags="-s -w" -o iceminus-darwin-arm64 .
+      - name: Install target (if needed)
+        run: |
+          rustup target add ${{ matrix.target }} || true
 
-      - name: Build linux-amd64
-        env:
-          GOOS: linux
-          GOARCH: amd64
-        run: go build -ldflags="-s -w" -o iceminus-linux-amd64 .
+      - name: Build release
+        run: |
+          cargo build --release --target ${{ matrix.target }}
 
-      - name: Build windows-amd64
-        env:
-          GOOS: windows
-          GOARCH: amd64
-        run: go build -ldflags="-s -w" -o iceminus-windows-amd64.exe .
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp target/${{ matrix.target }}/release/iceminus.exe out/${{ matrix.artifact }} || true
+          else
+            cp target/${{ matrix.target }}/release/iceminus out/${{ matrix.artifact }} || true
+            chmod +x out/${{ matrix.artifact }} || true
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/${{ matrix.artifact }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: iceminus-linux-amd64
+
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: iceminus-darwin-arm64
+
+      - name: Download windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: iceminus-windows-amd64.exe
+
+      - name: Gather artifacts to root
+        run: |
+          cp iceminus-linux-amd64/* . || true
+          cp iceminus-darwin-arm64/* . || true
+          cp "iceminus-windows-amd64.exe"/* . || true
+        shell: bash
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

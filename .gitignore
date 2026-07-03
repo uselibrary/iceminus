@@ -1,5 +1,6 @@
 # Binaries
 iceminus
+/target
 bin/
 *.exe
 *.exe~
@@ -25,3 +26,4 @@ vendor/
 # OS files
 .DS_Store
 Thumbs.db
+
