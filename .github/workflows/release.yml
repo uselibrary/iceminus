@@ -32,24 +32,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Install Rust (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          source $HOME/.cargo/env
-          rustup default stable
-
-      - name: Install Rust (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          choco install -y rustup
-          refreshenv || true
-          rustup default stable
-
-      - name: Install target (if needed)
-        run: |
-          rustup target add ${{ matrix.target }} || true
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Build release
         run: |
@@ -67,7 +53,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: out/${{ matrix.artifact }}
@@ -78,17 +64,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: iceminus-linux-amd64
 
       - name: Download mac artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: iceminus-darwin-arm64
 
       - name: Download windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: iceminus-windows-amd64.exe
 
