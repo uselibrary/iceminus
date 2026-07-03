@@ -32,11 +32,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Install Rust (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source $HOME/.cargo/env
+          rustup default stable
+
+      - name: Install Rust (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install -y rustup
+          refreshenv || true
+          rustup default stable
 
       - name: Install target (if needed)
         run: |
