@@ -27,3 +27,5 @@ vendor/
 .DS_Store
 Thumbs.db
 
+# python
+.venv/
